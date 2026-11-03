@@ -35,3 +35,4 @@ CREATE TABLE IF NOT EXISTS shares (
   CONSTRAINT fk_shares_member_id FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
   CONSTRAINT uq_shares_bill_member UNIQUE (bill_id, member_id)
 );
+
