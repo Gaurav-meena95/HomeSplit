@@ -155,3 +155,19 @@ You must understand every line you submit. We check this with your video and in 
 5. Paste the repository link and the video link in the application form.
 
 We will run `pnpm install && pnpm check && pnpm typecheck && pnpm test` on your repository.
+
+## Decisions
+
+### 1. Integer Cents Representation with Named Integrity Constraints
+
+Floating-point numbers in JavaScript and databases suffer from precision anomalies (e.g., `0.1 + 0.2 !== 0.3`). To maintain 100% financial correctness, all amounts are stored strictly as integer cents. In the database schema, we added explicit named constraints (`CONSTRAINT check_bills_total_cents_positive CHECK (total_cents > 0)`, `CONSTRAINT check_shares_amount_cents_positive CHECK (amount_cents > 0)`, `CONSTRAINT uq_shares_bill_member UNIQUE (bill_id, member_id)`, and Foreign Key constraints). These guarantee database-level data integrity, preventing invalid bills, orphaned rows, and duplicate shares.
+
+### 2. Atomic Conditional Updates for Idempotency and Concurrency Safety
+
+In distributed environments, two identical payment requests or concurrent user actions can arrive simultaneously. Rather than checking payment status in JavaScript memory (which has race conditions), we use an atomic database update:
+`UPDATE shares SET paid_at = ?, idempotency_key = ? WHERE id = ? AND bill_id = ? AND paid_at IS NULL`.
+We inspect `meta.changes`. If 0 rows were updated, we query the record: if the `idempotency_key` matches, we return the existing payment (HTTP 200); if it differs, we reject it with HTTP 409 Conflict. This guarantees that a share is never paid twice, and repeated requests with the same key safely return the original payment record.
+
+### 3. Monotonic Insertion Ordering and Clean Correlated Subqueries for Balances
+
+The problem requires extra cents from bill splitting to be distributed to members in the exact order they joined, and balances to be displayed in that same order. We enforce this with SQLite's internal monotonic sequence (`ORDER BY m.rowid ASC`). For balance calculations across multiple bills, rather than wide multi-table joins which risk row multiplication, we calculate each member's outstanding amount using a correlated subquery summing unpaid shares (`paid_at IS NULL`). This produces deterministic, zero-defect balance calculations.
